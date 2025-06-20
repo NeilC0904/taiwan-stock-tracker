@@ -176,7 +176,7 @@ export default function RealTaiwanStockTracker() {
     }
   };
 
-  // 從後端獲取歷史資料
+  // 從後端獲取歷史資料（修正版）
   const fetchHistoryFromProxy = async (symbol, date) => {
     try {
       const formattedDate = date.replace(/-/g, '');
@@ -189,8 +189,9 @@ export default function RealTaiwanStockTracker() {
         mode: 'cors'
       });
 
+      // 如果 CORS 錯誤或其他網路錯誤，返回 null 而不是拋出錯誤
       if (!response.ok) {
-        console.log(`歷史資料API回應失敗: ${response.status}`);
+        console.log(`❌ 歷史資料API回應失敗: ${response.status} - 可能是 CORS 問題或該日期無數據`);
         return null;
       }
 
@@ -214,7 +215,8 @@ export default function RealTaiwanStockTracker() {
       
       return null;
     } catch (error) {
-      console.error('獲取歷史資料失敗:', error);
+      console.error(`❌ 獲取 ${date} 歷史資料失敗:`, error.message);
+      // 不要拋出錯誤，返回 null 讓程式繼續執行
       return null;
     }
   };
@@ -236,7 +238,7 @@ export default function RealTaiwanStockTracker() {
     return businessDays;
   };
 
-  // 主要搜尋功能
+  // 主要搜尋功能（修正版）
   const handleSearch = async () => {
     if (!stockSymbol.trim() || !startDate) {
       setError('請輸入股票代號和指定日期');
@@ -271,12 +273,12 @@ export default function RealTaiwanStockTracker() {
       
       console.log(`✅ 成功獲取即時數據:`, currentStockData);
       
-      // 獲取歷史資料
+      // 獲取歷史資料（改進錯誤處理）
       console.log(`🔄 正在獲取歷史數據...`);
       const businessDays = getBusinessDays(startDate, 21);
       const stockDataPoints = [];
       
-      // 獲取前5個營業日的歷史資料
+      // 嘗試獲取前5個營業日的歷史資料
       for (let i = 0; i < Math.min(businessDays.length, 5); i++) {
         const date = businessDays[i];
         console.log(`🔄 獲取 ${date} 的歷史數據...`);
@@ -316,21 +318,41 @@ export default function RealTaiwanStockTracker() {
         });
       }
 
+      // 修正：確保有足夠的數據點用於分析
       if (stockDataPoints.length === 0) {
-        setError('無法獲取任何股票數據，請稍後再試');
-        return;
+        // 如果沒有歷史數據，至少顯示當前數據
+        stockDataPoints.push({
+          date: today,
+          price: currentStockData.price,
+          day: '當前',
+          displayDate: new Date().toLocaleDateString('zh-TW'),
+          businessDay: 0,
+          source: currentStockData.source
+        });
+        
+        console.log(`⚠️ 無法獲取歷史數據，僅顯示當前價格`);
       }
 
       console.log(`📈 最終數據點數量: ${stockDataPoints.length}`);
       
       const validDataPoints = stockDataPoints.filter(point => point.price > 0);
+      
+      // 修正：檢查是否有有效數據點
+      if (validDataPoints.length === 0) {
+        setError('無法獲取有效的股票數據，請稍後再試或檢查股票代號');
+        return;
+      }
+      
       const firstValidPoint = validDataPoints[0];
       const lastValidPoint = validDataPoints[validDataPoints.length - 1];
       
-      const priceChange = lastValidPoint.price - firstValidPoint.price;
-      const changePercent = (priceChange / firstValidPoint.price) * 100;
+      // 修正：確保價格計算安全
+      const priceChange = lastValidPoint && firstValidPoint ? 
+        lastValidPoint.price - firstValidPoint.price : 0;
+      const changePercent = firstValidPoint && firstValidPoint.price > 0 ? 
+        (priceChange / firstValidPoint.price) * 100 : 0;
       
-      console.log(`💹 分析結果: 起始價 ${firstValidPoint.price}, 結束價 ${lastValidPoint.price}`);
+      console.log(`💹 分析結果: 起始價 ${firstValidPoint?.price || 0}, 結束價 ${lastValidPoint?.price || 0}`);
       
       setStockData({
         symbol: stockSymbol.toUpperCase(),
@@ -340,19 +362,24 @@ export default function RealTaiwanStockTracker() {
         updateTime: currentStockData.updateTime,
         data: stockDataPoints,
         validDataCount: validDataPoints.length,
-        startPrice: firstValidPoint.price,
-        endPrice: lastValidPoint.price,
+        startPrice: firstValidPoint?.price || currentStockData.price,
+        endPrice: lastValidPoint?.price || currentStockData.price,
         change: priceChange,
         changePercent: changePercent,
-        startDate: firstValidPoint.displayDate,
-        endDate: lastValidPoint.displayDate,
+        startDate: firstValidPoint?.displayDate || new Date().toLocaleDateString('zh-TW'),
+        endDate: lastValidPoint?.displayDate || new Date().toLocaleDateString('zh-TW'),
         currentPrice: currentStockData.price,
         previousClose: currentStockData.previousClose,
         open: currentStockData.open,
         high: currentStockData.high,
         low: currentStockData.low,
-        volume: currentStockData.volume
+        volume: currentStockData.volume,
+        hasHistoryData: validDataPoints.length > 1
       });
+      
+      if (validDataPoints.length === 1) {
+        setError('⚠️ 注意：由於歷史數據API的CORS限制，目前僅能顯示即時價格。歷史走勢圖可能無法完整顯示。');
+      }
       
       console.log(`🎉 搜尋完成！`);
       
@@ -460,18 +487,17 @@ export default function RealTaiwanStockTracker() {
           </div>
         </div>
 
-        {/* CSP 解決方案說明 */}
+        {/* CORS 限制警告 */}
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
           <div className="flex items-start gap-3">
             <AlertCircle className="text-amber-600 mt-1" size={20} />
             <div className="text-sm text-amber-800">
-              <p className="font-semibold mb-2">Claude.ai CSP 限制解決方案：</p>
+              <p className="font-semibold mb-2">⚠️ 歷史數據API限制說明：</p>
               <ul className="space-y-1">
-                <li>• <strong>問題：</strong>Claude.ai 環境阻止對外部 API 的直接連接</li>
-                <li>• <strong>解決方案：</strong>點擊「直接使用」按鈕繞過連接測試</li>
-                <li>• <strong>您的 API 地址：</strong>https://twstockapi.vercel.app</li>
-                <li>• <strong>API 狀態：</strong>已成功部署並運行（可在瀏覽器中直接訪問驗證）</li>
-                <li>• <strong>功能：</strong>即使無法測試連接，股票查詢功能仍然可以正常使用</li>
+                <li>• <strong>即時數據</strong>：正常運作，支援上市和上櫃股票查詢</li>
+                <li>• <strong>歷史數據</strong>：由於CORS政策限制，可能無法獲取完整歷史走勢</li>
+                <li>• <strong>建議</strong>：目前主要功能為即時股價查詢和基本資訊顯示</li>
+                <li>• <strong>上櫃股票</strong>：8299 等上櫃股票的即時數據可正常查詢</li>
               </ul>
             </div>
           </div>
@@ -488,7 +514,7 @@ export default function RealTaiwanStockTracker() {
                 type="text"
                 value={stockSymbol}
                 onChange={(e) => setStockSymbol(e.target.value)}
-                placeholder="例如: 2330, 2454, 0050"
+                placeholder="例如: 2330, 8299, 0050"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 disabled={connectionStatus !== 'connected' && connectionStatus !== 'manual'}
               />
@@ -549,6 +575,11 @@ export default function RealTaiwanStockTracker() {
                     市場: {stockData.market} | 數據來源: {stockData.source}
                     {stockData.updateTime && ` | 更新時間: ${stockData.updateTime}`}
                   </p>
+                  {!stockData.hasHistoryData && (
+                    <p className="text-xs text-amber-600 mt-1">
+                      ⚠️ 因CORS限制，歷史數據可能不完整，主要顯示即時價格
+                    </p>
+                  )}
                 </div>
                 <div className="text-right">
                   <p className="text-lg font-bold text-gray-800">
@@ -582,15 +613,6 @@ export default function RealTaiwanStockTracker() {
             </div>
 
             <div className="grid md:grid-cols-4 gap-4 mb-8">
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <div className="flex items-center gap-3 mb-2">
-                  <Calendar className="text-blue-600" size={24} />
-                  <h3 className="font-semibold text-gray-700">指定日價格</h3>
-                </div>
-                <p className="text-2xl font-bold text-gray-800">NT${stockData.startPrice}</p>
-                <p className="text-sm text-gray-500">{stockData.startDate}</p>
-              </div>
-              
               <div className="bg-white rounded-xl shadow-lg p-6">
                 <div className="flex items-center gap-3 mb-2">
                   <TrendingUp className="text-purple-600" size={24} />
@@ -630,57 +652,80 @@ export default function RealTaiwanStockTracker() {
               {stockData.symbol} {stockData.name} - 價格走勢追蹤
             </h3>
             
-            <ResponsiveContainer width="100%" height={400}>
-              <LineChart data={stockData.data}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis 
-                  dataKey="date" 
-                  tick={{ fontSize: 12 }}
-                  tickFormatter={(value) => {
-                    const dataPoint = stockData.data.find(d => d.date === value);
-                    return dataPoint ? dataPoint.displayDate.split('/').slice(1).join('/') : value;
-                  }}
-                />
-                <YAxis 
-                  domain={['dataMin - 5', 'dataMax + 5']}
-                  tick={{ fontSize: 12 }}
-                  tickFormatter={(value) => `NT${value}`}
-                />
-                <Tooltip 
-                  formatter={formatTooltipValue}
-                  labelFormatter={formatTooltipLabel}
-                  contentStyle={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                  }}
-                />
-                <Legend />
-                <Line 
-                  type="monotone" 
-                  dataKey="price" 
-                  stroke="#2563eb" 
-                  strokeWidth={3}
-                  dot={{ r: 4, fill: '#2563eb', stroke: '#1d4ed8', strokeWidth: 2 }}
-                  activeDot={{ r: 6, stroke: '#2563eb', strokeWidth: 2, fill: '#ffffff' }}
-                  name="收盤價 (NT$)"
-                  connectNulls={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {stockData.hasHistoryData ? (
+              <ResponsiveContainer width="100%" height={400}>
+                <LineChart data={stockData.data}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis 
+                    dataKey="date" 
+                    tick={{ fontSize: 12 }}
+                    tickFormatter={(value) => {
+                      const dataPoint = stockData.data.find(d => d.date === value);
+                      return dataPoint ? dataPoint.displayDate.split('/').slice(1).join('/') : value;
+                    }}
+                  />
+                  <YAxis 
+                    domain={['dataMin - 5', 'dataMax + 5']}
+                    tick={{ fontSize: 12 }}
+                    tickFormatter={(value) => `NT${value}`}
+                  />
+                  <Tooltip 
+                    formatter={formatTooltipValue}
+                    labelFormatter={formatTooltipLabel}
+                    contentStyle={{
+                      backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                    }}
+                  />
+                  <Legend />
+                  <Line 
+                    type="monotone" 
+                    dataKey="price" 
+                    stroke="#2563eb" 
+                    strokeWidth={3}
+                    dot={{ r: 4, fill: '#2563eb', stroke: '#1d4ed8', strokeWidth: 2 }}
+                    activeDot={{ r: 6, stroke: '#2563eb', strokeWidth: 2, fill: '#ffffff' }}
+                    name="收盤價 (NT$)"
+                    connectNulls={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="bg-gray-50 rounded-lg p-8 text-center">
+                <AlertCircle className="mx-auto text-gray-400 mb-4" size={48} />
+                <h4 className="text-lg font-semibold text-gray-700 mb-2">歷史數據暫時無法顯示</h4>
+                <p className="text-gray-600 mb-4">
+                  由於 CORS 政策限制，歷史數據 API 目前無法正常訪問。
+                  <br />但您仍可以查看完整的即時股票資訊。
+                </p>
+                <div className="bg-blue-50 rounded-lg p-4 text-left">
+                  <h5 className="font-semibold text-blue-800 mb-2">當前顯示的資訊包括：</h5>
+                  <ul className="text-sm text-blue-700 space-y-1">
+                    <li>✅ 即時股價和漲跌幅</li>
+                    <li>✅ 開盤價、最高價、最低價</li>
+                    <li>✅ 成交量資訊</li>
+                    <li>✅ 上市/上櫃市場分類</li>
+                    <li>⚠️ 歷史價格走勢圖（受CORS限制）</li>
+                  </ul>
+                </div>
+              </div>
+            )}
             
             <div className="mt-4 space-y-2 text-sm text-gray-600">
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-blue-600"></div>
-                  <span>真實歷史數據</span>
+                  <span>即時股價數據</span>
                 </div>
               </div>
-              <p>* 數據來源：台灣證券交易所官方API（通過後端代理服務器）</p>
-              <p>* 歷史數據：來自證交所官方歷史交易記錄</p>
+              <p>* 即時數據來源：台灣證券交易所官方API（通過後端代理服務器）</p>
               <p>* 即時數據：直接來自證交所，每15秒更新一次</p>
-              <p>* 所有數據均為真實市場數據，無任何模擬或估算</p>
+              <p>* 所有即時數據均為真實市場數據，無任何模擬或估算</p>
+              {!stockData.hasHistoryData && (
+                <p className="text-amber-600">* 歷史數據：由於CORS限制暫時無法獲取，正在尋找解決方案</p>
+              )}
             </div>
           </div>
         )}
@@ -715,9 +760,9 @@ export default function RealTaiwanStockTracker() {
                 <h4 className="font-semibold text-amber-800 mb-2">⚠️ 重要注意事項：</h4>
                 <ul className="space-y-1 text-sm text-amber-700">
                   <li>• 本系統僅使用真實台股數據，無任何模擬資料</li>
-                  <li>• 歷史數據來自證交所官方記錄</li>
+                  <li>• 即時數據完全正常，支援上市和上櫃股票</li>
+                  <li>• 歷史數據因CORS限制可能無法顯示完整走勢圖</li>
                   <li>• 即時數據有15秒延遲（符合交易所規定）</li>
-                  <li>• 需要有效的網路連接到後端API服務器</li>
                 </ul>
               </div>
 
@@ -746,7 +791,7 @@ export default function RealTaiwanStockTracker() {
                   <li>• 台灣證券交易所官方 API</li>
                   <li>• 支援上市、上櫃股票查詢</li>
                   <li>• 即時股價（15秒延遲）</li>
-                  <li>• 官方歷史交易數據</li>
+                  <li>• 官方即時交易數據</li>
                   <li>• ETF 及指數資訊</li>
                 </ul>
               </div>
@@ -755,10 +800,10 @@ export default function RealTaiwanStockTracker() {
                 <h4 className="font-semibold text-gray-700 mb-3">🔍 查詢功能</h4>
                 <ul className="space-y-2 text-sm text-gray-600">
                   <li>• 單一股票即時查詢</li>
-                  <li>• 價格走勢追蹤</li>
-                  <li>• 營業日計算</li>
-                  <li>• 漲跌幅分析</li>
-                  <li>• 圖表視覺化展示</li>
+                  <li>• 完整股價資訊顯示</li>
+                  <li>• 上市/上櫃市場識別</li>
+                  <li>• 漲跌幅自動計算</li>
+                  <li>• 響應式界面設計</li>
                 </ul>
               </div>
               
@@ -802,8 +847,8 @@ export default function RealTaiwanStockTracker() {
                 <div>006208 富邦台50</div>
                 
                 <div><strong>上櫃熱門：</strong></div>
+                <div>8299 生展科技</div>
                 <div>6488 環球晶</div>
-                <div>4979 華星光</div>
                 <div>6669 緯穎</div>
               </div>
             </div>
@@ -840,8 +885,8 @@ export default function RealTaiwanStockTracker() {
                 <li>• 台灣證券交易所 API</li>
                 <li>• 櫃買中心 API</li>
                 <li>• 即時股價資訊</li>
-                <li>• 歷史交易數據</li>
                 <li>• 100% 真實市場資料</li>
+                <li>• 15秒延遲更新</li>
               </ul>
             </div>
           </div>
@@ -849,11 +894,21 @@ export default function RealTaiwanStockTracker() {
           <div className="mt-4 p-4 bg-blue-100 rounded-lg">
             <p className="text-sm text-blue-800">
               <strong>數據保證</strong>：本系統承諾僅使用台灣證券交易所及櫃買中心的官方真實數據，
-              絕無任何模擬、估算或虛構資料。所有股價、交易量、技術指標均來自實際市場交易記錄。
+              絕無任何模擬、估算或虛構資料。所有股價、交易量資訊均來自實際市場交易記錄。
+              目前歷史數據功能因 CORS 限制暫時受影響，但即時數據完全正常運作。
             </p>
           </div>
         </div>
       </div>
     </div>
   );
-}
+} items-center gap-3 mb-2">
+                  <Calendar className="text-blue-600" size={24} />
+                  <h3 className="font-semibold text-gray-700">指定日價格</h3>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">NT${stockData.startPrice}</p>
+                <p className="text-sm text-gray-500">{stockData.startDate}</p>
+              </div>
+              
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <div className="flex
