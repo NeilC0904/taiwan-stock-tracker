@@ -271,6 +271,12 @@ export default function RealTaiwanStockTracker() {
         return;
       }
       
+      // 驗證即時數據的完整性
+      if (!currentStockData.price || currentStockData.price <= 0) {
+        setError(`股票代號 "${stockSymbol}" 的即時價格數據異常，請稍後再試`);
+        return;
+      }
+      
       console.log(`✅ 成功獲取即時數據:`, currentStockData);
       
       // 獲取歷史資料（改進錯誤處理）
