@@ -113,21 +113,30 @@ export default function RealTaiwanStockTracker() {
         const stockInfo = data.data.msgArray[0];
         console.log('✅ 找到上市股票:', stockInfo);
         
-        return {
-          symbol: stockInfo.c,
-          name: stockInfo.n,
-          price: parseFloat(stockInfo.z || stockInfo.y),
-          open: parseFloat(stockInfo.o || 0),
-          high: parseFloat(stockInfo.h || 0),
-          low: parseFloat(stockInfo.l || 0),
-          volume: parseInt(stockInfo.v || 0),
-          previousClose: parseFloat(stockInfo.y || 0),
-          change: parseFloat(stockInfo.tv || 0),
-          changePercent: parseFloat(stockInfo.pz || 0),
-          source: 'TSE-即時',
-          updateTime: stockInfo.t,
-          market: '上市'
-        };
+        // 驗證股票資料的完整性
+        const price = parseFloat(stockInfo.z || stockInfo.y || 0);
+        const name = stockInfo.n || '';
+        
+        if (!name || name.trim() === '' || price <= 0 || isNaN(price)) {
+          console.log('❌ 上市股票數據不完整或無效:', { price, name, rawData: stockInfo });
+          // 繼續嘗試上櫃查詢
+        } else {
+          return {
+            symbol: stockInfo.c || symbol,
+            name: name.trim(),
+            price: price,
+            open: parseFloat(stockInfo.o || 0),
+            high: parseFloat(stockInfo.h || 0),
+            low: parseFloat(stockInfo.l || 0),
+            volume: parseInt(stockInfo.v || 0),
+            previousClose: parseFloat(stockInfo.y || 0),
+            change: parseFloat(stockInfo.tv || 0),
+            changePercent: parseFloat(stockInfo.pz || 0),
+            source: 'TSE-即時',
+            updateTime: stockInfo.t || '',
+            market: '上市'
+          };
+        }
       }
 
       // 如果上市沒找到，嘗試上櫃
@@ -151,10 +160,19 @@ export default function RealTaiwanStockTracker() {
         const stockInfo = data.data.msgArray[0];
         console.log('✅ 找到上櫃股票:', stockInfo);
         
+        // 驗證股票資料的完整性
+        const price = parseFloat(stockInfo.z || stockInfo.y || 0);
+        const name = stockInfo.n || '';
+        
+        if (!name || name.trim() === '' || price <= 0 || isNaN(price)) {
+          console.log('❌ 上櫃股票數據不完整或無效:', { price, name, rawData: stockInfo });
+          return null;
+        }
+        
         return {
-          symbol: stockInfo.c,
-          name: stockInfo.n,
-          price: parseFloat(stockInfo.z || stockInfo.y),
+          symbol: stockInfo.c || symbol,
+          name: name.trim(),
+          price: price,
           open: parseFloat(stockInfo.o || 0),
           high: parseFloat(stockInfo.h || 0),
           low: parseFloat(stockInfo.l || 0),
@@ -163,7 +181,7 @@ export default function RealTaiwanStockTracker() {
           change: parseFloat(stockInfo.tv || 0),
           changePercent: parseFloat(stockInfo.pz || 0),
           source: 'OTC-即時',
-          updateTime: stockInfo.t,
+          updateTime: stockInfo.t || '',
           market: '上櫃'
         };
       }
@@ -272,8 +290,15 @@ export default function RealTaiwanStockTracker() {
       }
       
       // 驗證即時數據的完整性
-      if (!currentStockData.price || currentStockData.price <= 0) {
-        setError(`股票代號 "${stockSymbol}" 的即時價格數據異常，請稍後再試`);
+      if (!currentStockData.price || currentStockData.price <= 0 || isNaN(currentStockData.price)) {
+        console.error('❌ 即時數據驗證失敗:', currentStockData);
+        setError(`股票代號 "${stockSymbol}" 的數據異常：可能是停牌、下市，或該股票代號不存在。請檢查股票代號或稍後再試。`);
+        return;
+      }
+      
+      if (!currentStockData.name || currentStockData.name.trim() === '') {
+        console.error('❌ 股票名稱為空:', currentStockData);
+        setError(`股票代號 "${stockSymbol}" 無法獲取完整資訊，請確認代號是否正確。`);
         return;
       }
       
@@ -313,7 +338,7 @@ export default function RealTaiwanStockTracker() {
       const today = new Date().toISOString().split('T')[0];
       const hasCurrentData = stockDataPoints.some(point => point.date === today);
       
-      if (!hasCurrentData) {
+      if (!hasCurrentData && currentStockData.price > 0) {
         stockDataPoints.push({
           date: today,
           price: currentStockData.price,
@@ -324,9 +349,9 @@ export default function RealTaiwanStockTracker() {
         });
       }
 
-      // 修正：確保有足夠的數據點用於分析
-      if (stockDataPoints.length === 0) {
-        // 如果沒有歷史數據，至少顯示當前數據
+      // 修正：確保至少有一個有效的數據點
+      if (stockDataPoints.length === 0 && currentStockData.price > 0) {
+        // 如果沒有任何歷史數據，至少添加當前數據
         stockDataPoints.push({
           date: today,
           price: currentStockData.price,
@@ -340,8 +365,9 @@ export default function RealTaiwanStockTracker() {
       }
 
       console.log(`📈 最終數據點數量: ${stockDataPoints.length}`);
+      console.log(`📊 數據點詳情:`, stockDataPoints);
       
-      const validDataPoints = stockDataPoints.filter(point => point.price > 0);
+      const validDataPoints = stockDataPoints.filter(point => point && point.price && point.price > 0);
       
       // 修正：檢查是否有有效數據點
       if (validDataPoints.length === 0) {
@@ -349,16 +375,29 @@ export default function RealTaiwanStockTracker() {
         return;
       }
       
-      const firstValidPoint = validDataPoints[0];
-      const lastValidPoint = validDataPoints[validDataPoints.length - 1];
+      // 確保安全地獲取第一個和最後一個數據點
+      const firstValidPoint = validDataPoints[0] || null;
+      const lastValidPoint = validDataPoints[validDataPoints.length - 1] || firstValidPoint || null;
       
-      // 修正：確保價格計算安全
-      const priceChange = lastValidPoint && firstValidPoint ? 
-        lastValidPoint.price - firstValidPoint.price : 0;
-      const changePercent = firstValidPoint && firstValidPoint.price > 0 ? 
-        (priceChange / firstValidPoint.price) * 100 : 0;
+      // 修正：更安全的價格計算
+      let priceChange = 0;
+      let changePercent = 0;
       
-      console.log(`💹 分析結果: 起始價 ${firstValidPoint?.price || 0}, 結束價 ${lastValidPoint?.price || 0}`);
+      if (firstValidPoint && lastValidPoint && firstValidPoint.price && lastValidPoint.price) {
+        priceChange = lastValidPoint.price - firstValidPoint.price;
+        if (firstValidPoint.price > 0) {
+          changePercent = (priceChange / firstValidPoint.price) * 100;
+        }
+      }
+      
+      // 使用即時數據作為備用
+      const safeStartPrice = firstValidPoint?.price || currentStockData.price || 0;
+      const safeEndPrice = lastValidPoint?.price || currentStockData.price || 0;
+      const safeStartDate = firstValidPoint?.displayDate || new Date().toLocaleDateString('zh-TW');
+      const safeEndDate = lastValidPoint?.displayDate || new Date().toLocaleDateString('zh-TW');
+      
+      console.log(`💹 分析結果: 起始價 ${safeStartPrice}, 結束價 ${safeEndPrice}`);
+      console.log(`📊 有效數據點: ${validDataPoints.length}, 總數據點: ${stockDataPoints.length}`);
       
       setStockData({
         symbol: stockSymbol.toUpperCase(),
@@ -368,12 +407,12 @@ export default function RealTaiwanStockTracker() {
         updateTime: currentStockData.updateTime,
         data: stockDataPoints,
         validDataCount: validDataPoints.length,
-        startPrice: firstValidPoint?.price || currentStockData.price,
-        endPrice: lastValidPoint?.price || currentStockData.price,
+        startPrice: safeStartPrice,
+        endPrice: safeEndPrice,
         change: priceChange,
         changePercent: changePercent,
-        startDate: firstValidPoint?.displayDate || new Date().toLocaleDateString('zh-TW'),
-        endDate: lastValidPoint?.displayDate || new Date().toLocaleDateString('zh-TW'),
+        startDate: safeStartDate,
+        endDate: safeEndDate,
         currentPrice: currentStockData.price,
         previousClose: currentStockData.previousClose,
         open: currentStockData.open,
@@ -503,7 +542,7 @@ export default function RealTaiwanStockTracker() {
                 <li>• <strong>即時數據</strong>：正常運作，支援上市和上櫃股票查詢</li>
                 <li>• <strong>歷史數據</strong>：由於CORS政策限制，可能無法獲取完整歷史走勢</li>
                 <li>• <strong>建議</strong>：目前主要功能為即時股價查詢和基本資訊顯示</li>
-                <li>• <strong>上櫃股票</strong>：8299 等上櫃股票的即時數據可正常查詢</li>
+                <li>• <strong>上櫃股票</strong>：4979、6488 等上櫃股票的即時數據可正常查詢</li>
               </ul>
             </div>
           </div>
@@ -520,7 +559,7 @@ export default function RealTaiwanStockTracker() {
                 type="text"
                 value={stockSymbol}
                 onChange={(e) => setStockSymbol(e.target.value)}
-                placeholder="例如: 2330, 8299, 0050"
+                placeholder="例如: 2330, 4979, 0050"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 disabled={connectionStatus !== 'connected' && connectionStatus !== 'manual'}
               />
@@ -619,6 +658,15 @@ export default function RealTaiwanStockTracker() {
             </div>
 
             <div className="grid md:grid-cols-4 gap-4 mb-8">
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <div className="flex items-center gap-3 mb-2">
+                  <Calendar className="text-blue-600" size={24} />
+                  <h3 className="font-semibold text-gray-700">指定日價格</h3>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">NT${stockData.startPrice}</p>
+                <p className="text-sm text-gray-500">{stockData.startDate}</p>
+              </div>
+              
               <div className="bg-white rounded-xl shadow-lg p-6">
                 <div className="flex items-center gap-3 mb-2">
                   <TrendingUp className="text-purple-600" size={24} />
@@ -853,7 +901,7 @@ export default function RealTaiwanStockTracker() {
                 <div>006208 富邦台50</div>
                 
                 <div><strong>上櫃熱門：</strong></div>
-                <div>8299 生展科技</div>
+                <div>4979 華星光</div>
                 <div>6488 環球晶</div>
                 <div>6669 緯穎</div>
               </div>
@@ -908,13 +956,4 @@ export default function RealTaiwanStockTracker() {
       </div>
     </div>
   );
-} items-center gap-3 mb-2">
-                  <Calendar className="text-blue-600" size={24} />
-                  <h3 className="font-semibold text-gray-700">指定日價格</h3>
-                </div>
-                <p className="text-2xl font-bold text-gray-800">NT${stockData.startPrice}</p>
-                <p className="text-sm text-gray-500">{stockData.startDate}</p>
-              </div>
-              
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <div className="flex
+}
