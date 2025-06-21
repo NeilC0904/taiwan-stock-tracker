@@ -196,49 +196,52 @@ export default function RealTaiwanStockTracker() {
 
   // 從後端獲取歷史資料（修正版）
   const fetchHistoryFromProxy = async (symbol, date) => {
-    try {
-      const formattedDate = date.replace(/-/g, '');
-      const response = await fetch(`${backendUrl}/api/twse/stock/daily/${symbol}?date=${formattedDate}`, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        },
-        mode: 'cors'
-      });
+  try {
+    const formattedDate = date.replace(/-/g, '');
+    const response = await fetch(`${backendUrl}/api/twse/stock/daily/${symbol}?date=${formattedDate}`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      mode: 'cors'
+    });
 
-      // 如果 CORS 錯誤或其他網路錯誤，返回 null 而不是拋出錯誤
-      if (!response.ok) {
-        console.log(`❌ 歷史資料API回應失敗: ${response.status} - 可能是 CORS 問題或該日期無數據`);
-        return null;
-      }
-
-      const data = await response.json();
-      
-      if (data.success && data.data && Array.isArray(data.data) && data.data.length > 0) {
-        const stockInfo = data.data.find(item => item[0] === symbol);
-        
-        if (stockInfo && stockInfo.length >= 9) {
-          return {
-            date: date,
-            price: parseFloat(stockInfo[8].replace(/,/g, '')) || 0,
-            volume: parseInt(stockInfo[2].replace(/,/g, '')) || 0,
-            high: parseFloat(stockInfo[4].replace(/,/g, '')) || 0,
-            low: parseFloat(stockInfo[5].replace(/,/g, '')) || 0,
-            open: parseFloat(stockInfo[3].replace(/,/g, '')) || 0,
-            source: 'TWSE-歷史'
-          };
-        }
-      }
-      
-      return null;
-    } catch (error) {
-      console.error(`❌ 獲取 ${date} 歷史資料失敗:`, error.message);
-      // 不要拋出錯誤，返回 null 讓程式繼續執行
+    if (!response.ok) {
+      console.log(`❌ 歷史資料API回應失敗: ${response.status} - 可能是 CORS 問題或該日期無數據`);
       return null;
     }
-  };
 
+    const data = await response.json();
+
+    // 這裡的 data.data 現在應該是後端解析後的 parsedDailyData 物件
+    // data.data 會直接是 { date: ..., open: ..., close: ..., etc. }
+    if (data.success && data.data) { // 檢查 data.data 是否存在且有效
+      const parsedData = data.data; // 直接使用後端已經解析好的數據
+
+      // 確保數據是有效的，例如收盤價大於0
+      if (parsedData.close && parsedData.close > 0) {
+        return {
+          date: parsedData.date, // 從後端解析後的數據中獲取
+          price: parsedData.close, // 後端已經提供了正確的 close price
+          volume: parsedData.volume,
+          high: parsedData.high,
+          low: parsedData.low,
+          open: parsedData.open,
+          source: 'TWSE-歷史'
+        };
+      }
+    }
+    
+    // 如果沒有有效數據或解析失敗
+    return null;
+
+  } catch (error) {
+    console.error(`❌ 獲取 ${date} 歷史資料失敗:`, error.message);
+    return null;
+  }
+};
+  
   // 獲取營業日列表
   const getBusinessDays = (startDate, days) => {
     const businessDays = [];
